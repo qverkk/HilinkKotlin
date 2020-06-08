@@ -42,6 +42,19 @@ class LoginErrorUsernamePasswordModifyException(message:String, code: Int): Resp
 // ENUMS
 // ==============================================================================
 
+enum class LteBands(val value: String, val bandName: String, val ableToCa: Boolean = true) {
+    B1("1", "2100"),
+    B3("4", "1800"),
+    B7("40", "2600"),
+    B8("80", "900"),
+    B20("80000", "800"),
+    B38("2000000000", "TDD 2600"),
+    B40("8000000000", "TDD 2300"),
+    ALL_EU("800C5", "Bands 1,3,7,8,20", false),
+    EU_ASIA_AFRICA("800D5", "Bands 1,3,5,7,8,20", false),
+    ALL_BANDS("7FFFFFFFFFFFFFFF", "All bands", false)
+}
+
 enum class ResponseCodeEnum(val value: Int) {
     ERROR_SYSTEM_UNKNOWN(100001),
     ERROR_SYSTEM_NO_SUPPORT(100002),
@@ -143,6 +156,16 @@ data class Error(
     val code: Int,
     @JacksonXmlProperty(localName = "message")
     val message: String
+)
+
+@JsonRootName("request")
+data class LteBandChange(
+    @set:JsonProperty("NetworkMode")
+    var networkMode: String,
+    @set:JsonProperty("NetworkBand")
+    var networkBand: String,
+    @set:JsonProperty("LTEBand")
+    var lteBand: String
 )
 
 @JacksonXmlRootElement(localName = "response")
@@ -323,13 +346,16 @@ class Huawei(url: String, username: String = "admin", password: String?) {
     }
 
     private fun checkResponse(response: okhttp3.Response, mutator: Class<*>): Any? {
-        val responseString = response.body?.string()
+        var responseString = response.body?.string()
         println(responseString)
         if (!response.isSuccessful) {
             throw ConnectionErrorException("Connection error: ${response.code}")
         }
 
         try {
+            if (!responseString!!.contains("<message>")) {
+                responseString = responseString.replace("<message/>", "<message>No message</message>")
+            }
             val errorResponse = xmlMapper.readValue(responseString, Error::class.java)
 
             val errorCodeMessage = when (ResponseCodeEnum.fromInt(errorResponse.code)) {
@@ -362,12 +388,8 @@ class Huawei(url: String, username: String = "admin", password: String?) {
         return this.checkResponse(response, mutator)
     }
 
-    fun doPostRequest(endpoint: String, data: Login, mutator: Class<*>): Any? {
+    fun doPostRequest(endpoint: String, data: Any, mutator: Class<*>): Any? {
         val url = this._url + "api/" + endpoint
-
-        // !FIXME !!!!!!!!!!!!!!!!!
-        // !FIXME Jackson XML is somehow broken, it ignores localName when using writeValueAsString....
-        // !FIXME !!!!!!!!!!!!!!!!!
 
         val loginRequestBody = xmlMapper.writeValueAsString(data)
 
@@ -396,15 +418,36 @@ class Huawei(url: String, username: String = "admin", password: String?) {
     fun getNetNetMode(): NetModeResponse {
         return this.doGetRequest("net/net-mode", NetModeResponse::class.java) as NetModeResponse
     }
+
+    /**
+     * This is temporarly here for testing reasons to change lte bands
+     */
+
+    fun setLteBand() {
+        val request = LteBandChange("3", "3FFFFFFF", caBands(LteBands.B1, LteBands.B3, LteBands.B20).toString())
+        this.doPostRequest("net/net-mode", request, Response::class.java)
+    }
+}
+
+fun caBands(vararg bands: LteBands): Long {
+    var result = 0L
+    bands.forEach {
+        result += it.value.toInt()
+    }
+    return result
 }
 
 // ==============================================================================
 // MAIN
 // ==============================================================================
 
+// NetModeResponse(networkMode=03, networkBand=2000004400000, lTEBand=5)
 fun main(args: Array<String>) {
     val huawei = Huawei("http://192.168.8.1/", "admin", "YOURPASSWORD")
     huawei.login()
-    val message = huawei.getNetNetMode()
+    var message = huawei.getNetNetMode()
+    println(message)
+    huawei.setLteBand()
+    message = huawei.getNetNetMode()
     println(message)
 }
