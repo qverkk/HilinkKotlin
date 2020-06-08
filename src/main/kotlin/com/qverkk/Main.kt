@@ -1,5 +1,7 @@
 package com.qverkk
 
+import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.annotation.JsonRootName
 import com.fasterxml.jackson.databind.exc.ValueInstantiationException
 import com.fasterxml.jackson.dataformat.xml.XmlMapper
 import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlProperty
@@ -16,127 +18,74 @@ import org.apache.commons.codec.digest.DigestUtils
 import java.net.CookieManager
 import java.net.CookiePolicy
 
-lateinit var client: OkHttpClient
-var sessToken: SessionToken? = null
+// ==============================================================================
+// EXCEPTIONS
+// ==============================================================================
 
-fun main(args: Array<String>) {
-    var token = ""
-    val errorsString = "100002 - brak wsparcia w firmware lub błędny adres API\n" +
-            "100003 - brak uprawnień\n" +
-            "100004 - system zajęty\n" +
-            "100005 - brak informacji o danym błędzie\n" +
-            "100006 - błędny parametr\n" +
-            "100009 - błąd zapisu\n" +
-            "103002 - brak informacji o danym błędzie\n" +
-            "103015 - brak informacji o danym błędzie\n" +
-            "108001 - niepoprawna nazwa użytkownika\n" +
-            "108002 - niepoprawne hasło użytkownika\n" +
-            "108003 - użytkownik aktualnie zalogowany\n" +
-            "108006 - nieprawidłowa nazwa użytkownika lub hasło\n" +
-            "108007 - nieprawidłowa nazwa użytkownika lub hasło, osiągnięto limit prób\n" +
-            "110024 - bateria poniżej 50% (przy aktualizacji oprogramowania)\n" +
-            "111019 - brak odpowiedzi sieci\n" +
-            "111020 - przekroczenie czasu sieci\n" +
-            "111022 - sieć nie obsługuje\n" +
-            "113018 - system zajęty (dotyczy operacji na SMS'ach)\n" +
-            "114001 - plik już istnieje\n" +
-            "114002 - plik już istnieje\n" +
-            "114003 - karta SD jest obecnie w użyciu\n" +
-            "114004 - udostępniona ścieżka nie istnieje\n" +
-            "114005 - zbyt długa ścieżka dostępu\n" +
-            "114006 - brak uprawnień do pliku/katalogu\n" +
-            "115001 - brak informacji o danym błędzie\n" +
-            "117001 - niepoprawne hasło (przy połączeniu WiFi)\n" +
-            "117004 - niepoprawne hasło WISPr (przy połączeniu WiFi)\n" +
-            "120001 - połączenie głosowe zajęte\n" +
-            "125001 - niepoprawny token\n" +
-            "125003 - ERROR_WRONG_SESSION_TOKEN"
+class ConnectionErrorException(message: String): Exception(message)
 
-    val errors = errorsString.split("\n")
+open class ResponseErrorException(message:String, public val code: Int): Exception(message)
 
-    val logging = HttpLoggingInterceptor()
-    logging.setLevel(HttpLoggingInterceptor.Level.HEADERS)
+class ResponseErrorSystemBusyException(message:String, code: Int): ResponseErrorException(message, code)
+class ResponseErrorLoginRequiredException(message:String, code: Int): ResponseErrorException(message, code)
+class ResponseErrorNotSupportedException(message:String, code: Int): ResponseErrorException(message, code)
+class ResponseErrorLoginCsrfException(message:String, code: Int): ResponseErrorException(message, code)
 
-    val cookieManager = CookieManager()
+class LoginErrorUsernameWrongException(message:String, code: Int): ResponseErrorException(message, code)
+class LoginErrorPasswordWrongException(message:String, code: Int): ResponseErrorException(message, code)
+class LoginErrorAlreadyLoginException(message:String, code: Int): ResponseErrorException(message, code)
+class LoginErrorUsernamePasswordWrongException(message:String, code: Int): ResponseErrorException(message, code)
+class LoginErrorUsernamePasswordOverrunException(message:String, code: Int): ResponseErrorException(message, code)
+class LoginErrorUsernamePasswordModifyException(message:String, code: Int): ResponseErrorException(message, code)
 
-    cookieManager.setCookiePolicy(CookiePolicy.ACCEPT_ALL)
+// ==============================================================================
+// ENUMS
+// ==============================================================================
 
-    client = OkHttpClient.Builder().cookieJar(JavaNetCookieJar(cookieManager)).addInterceptor {
-        val orginal = it.request()
-
-        if (sessToken != null) {
-            val authorized = orginal.newBuilder()
-                .addHeader("Cookie", "SessionID=${sessToken!!.sesInfo}")
-                .addHeader("__RequestVerificationToken", sessToken!!.tokInfo)
-                .build()
-
-            it.proceed(authorized)
-        } else {
-            it.proceed(orginal)
-        }
-    }.addInterceptor(logging).build()
+enum class ResponseCodeEnum(val value: Int) {
+    ERROR_SYSTEM_UNKNOWN(100001),
+    ERROR_SYSTEM_NO_SUPPORT(100002),
+    ERROR_SYSTEM_NO_RIGHTS(100003),
+    ERROR_SYSTEM_BUSY(100004),
+    ERROR_SYSTEM_CSRF(125002);
 
 
-    val xmlMapper = XmlMapper()
-    sessToken = getSessionToken()
-    val loginUser = Login(
-        "admin",
-        Base64.encodeBase64String(
-            DigestUtils.sha256Hex(
-                "admin" +
-                        Base64.encodeBase64String(DigestUtils.sha256("password")) +
-                        sessToken!!.tokInfo
-            ).toByteArray()
-        )
-    )
-
-    val loginRequestBody = (xmlMapper.writeValueAsString(loginUser))
-    println(loginRequestBody)
-
-    val requestBody = RequestBody.create("application/xml".toMediaTypeOrNull(), loginRequestBody)
-    val request = Request.Builder().url("http://192.168.8.1/api/user/login").post(
-        requestBody
-    ).build()
-
-    val response = client.newCall(request).execute()
-
-    val bodyResponse = response.body?.string()
-    println("Response: $bodyResponse")
-
-    try {
-        val errorResponse = xmlMapper.readValue(bodyResponse, Error::class.java)
-        errors.forEach {
-            if (it.contains(errorResponse.code.toString())) {
-                println(it)
-                return@forEach
-            }
-        }
-    } catch (ex: ValueInstantiationException) {
-        val connectionResponse = xmlMapper.readValue(bodyResponse, Response::class.java)
-        println(connectionResponse.status)
+    companion object {
+        private val map = ResponseCodeEnum.values().associateBy(ResponseCodeEnum::value)
+        fun fromInt(type: Int) = map[type]
     }
-
-    val tokenReques = Request.Builder().url("http://192.168.8.1/api/webserver/token").get().build()
-    val tokenResponse = client.newCall(tokenReques).execute()
-
-    val tokenBodyResponse = tokenResponse.body?.string()
-    val tokenResponseObj = xmlMapper.readValue(tokenBodyResponse, TokenResponse::class.java)
-//    token = tokenResponseObj.token
-
-    val statsRequest = Request.Builder().url("http://192.168.8.1/api/net/net-mode").get().build()
-    val statsResponse = client.newCall(statsRequest).execute()
-
-    statsResponse.request.headers.forEach { println(it.first + " " + it.second) }
-
-    val statsBodyResponse = statsResponse.body?.string()
-    println("Response $statsBodyResponse")
 }
 
-@JacksonXmlRootElement(localName = "response")
-data class TokenResponse(
-    @JacksonXmlProperty(localName = "token")
-    val token: String
-)
+enum class PasswordTypeEnum(val value: Int) {
+    BASE_64(0),
+    BASE_64_AFTER_PASSWORD_CHANGE(3),
+    SHA256(4);
+
+    companion object {
+        private val map = PasswordTypeEnum.values().associateBy(PasswordTypeEnum::value)
+        fun fromInt(type: Int) = map[type]
+    }
+}
+
+enum class LoginErrorEnum(val value: Int) {
+    USERNAME_WRONG(108001),
+    PASSWORD_WRONG(108002),
+    ALREADY_LOGIN(108003),
+    USERNAME_PWD_WRONG(108006),
+    USERNAME_PWD_ORERRUN(108007),
+    USERNAME_PWD_MODIFY(115002);
+
+    companion object {
+        private val map = LoginErrorEnum.values().associateBy(LoginErrorEnum::value)
+        fun fromInt(type: Int) = map[type]
+    }
+}
+
+// ==============================================================================
+// DATA MODELS
+// ==============================================================================
+
+val xmlMapper = XmlMapper()
 
 data class Response(
     @JacksonXmlText
@@ -145,11 +94,23 @@ data class Response(
 )
 
 @JacksonXmlRootElement(localName = "request")
-data class Login(
+data class StateLogin(
+    @JacksonXmlProperty(localName = "State")
+    val state: String,
+    @JacksonXmlProperty(localName = "username")
     val username: String,
-    val password: String,
     @JacksonXmlProperty(localName = "password_type")
-    val password_type: Int = 4
+    val passwordType: Int = 4
+)
+
+@JsonRootName("request")
+data class Login(
+    @set:JsonProperty("Username")
+    var username: String,
+    @set:JsonProperty("Password")
+    var password: String,
+    @set:JsonProperty("password_type")
+    var passwordType: Int = 4
 )
 
 @JacksonXmlRootElement(localName = "error")
@@ -174,23 +135,251 @@ data class SessionToken(
     val tokInfo: String
 )
 
-fun getToken(): String {
-    val url = "http://192.168.8.1/api/webserver/token"
-    val request = Request.Builder().url(url).get().build()
+@JacksonXmlRootElement(localName = "response")
+data class NetModeResponse(
+    @JacksonXmlProperty(localName = "NetworkMode")
+    val networkMode: String,
+    @JacksonXmlProperty(localName = "NetworkBand")
+    val networkBand: String,
+    @JacksonXmlProperty(localName = "LTEBand")
+    val lTEBand: String
+)
 
-    val response = client.newCall(request).execute()
-    val xmlMapper = XmlMapper()
-    val responseString = response.body?.string()
-    val token = xmlMapper.readValue(responseString, Token::class.java)
-    return token.token
+
+// ==============================================================================
+// Huawei class
+// ==============================================================================
+
+class Huawei(url: String, username: String = "admin", password: String?) {
+    private var _url: String
+    private var _username: String
+    private var _password: String?
+    private lateinit var client: OkHttpClient
+    private var requestVerificationTokens: ArrayList<String> = ArrayList<String>()
+
+    init {
+        if (!url.endsWith("/")) {
+            this._url = "$url/"
+        } else {
+            this._url = url
+        }
+
+        this._username = username
+        this._password = password
+
+        this.initializeClient()
+        this.initializeCsrfTokens()
+    }
+
+    private fun initializeClient() {
+        val logging = HttpLoggingInterceptor()
+        logging.setLevel(HttpLoggingInterceptor.Level.HEADERS)
+
+        val cookieManager = CookieManager()
+        cookieManager.setCookiePolicy(CookiePolicy.ACCEPT_ALL)
+
+        this.client = OkHttpClient.Builder().cookieJar(JavaNetCookieJar(cookieManager)).addInterceptor {
+            val orginal = it.request()
+
+            if (!this.requestVerificationTokens.isEmpty()) {
+                val verificationToken: String
+                if (this.requestVerificationTokens.size > 1) {
+                    verificationToken = this.requestVerificationTokens.first()
+                    this.requestVerificationTokens.removeAt(0)
+                } else {
+                    verificationToken = this.requestVerificationTokens.first()
+                }
+
+                val authorized = orginal.newBuilder()
+                    .addHeader("__RequestVerificationToken", verificationToken)
+                    .build()
+
+                it.proceed(authorized)
+            } else {
+                it.proceed(orginal)
+            }
+        }.addInterceptor(logging).build()
+    }
+
+    private fun initializeCsrfTokens() {
+        this.requestVerificationTokens.clear()
+
+        val request = Request.Builder().url(this._url).get().build()
+
+        val response = this.client.newCall(request).execute()
+        val responseString = response.body?.string()
+
+        if (responseString != null) {
+            val matches = Regex("name=\"csrf_token\"\\s+content=\"(\\S+)\"").findAll(responseString)
+
+            if (matches.any()) {
+                matches.forEach { f ->
+                    this.requestVerificationTokens.add(f.groupValues[1])
+                }
+                return // No need to continue
+            }
+        }
+
+        var token: String
+        try {
+            val data = this.getToken()
+            token = data.token
+        } catch (e: ResponseErrorNotSupportedException) {
+            val data = this.getSessionToken()
+            token = data.tokInfo
+        }
+
+        this.requestVerificationTokens.add(token)
+    }
+
+    private fun doLoginMagic(passwordType: PasswordTypeEnum?) {
+        var passwordEncoded = ""
+        if (!this._password!!.isEmpty()) {
+            passwordEncoded = if (passwordType == PasswordTypeEnum.SHA256) {
+                Base64.encodeBase64String(
+                    DigestUtils.sha256Hex(
+                        this._username +
+                                Base64.encodeBase64String(DigestUtils.sha256Hex(this._password).toByteArray()) +
+                                this.requestVerificationTokens.first()
+                    ).toByteArray()
+                )
+            } else {
+                Base64.encodeBase64String(this._password!!.toByteArray())
+            }
+        }
+
+        try {
+            val userLoginRequest = Login(this._username, passwordEncoded)
+            this.doPostRequest("user/login", userLoginRequest, Response::class.java)
+        } catch (e: ResponseErrorException) {
+
+            val errorCodeMessage = when(LoginErrorEnum.fromInt(e.code)) {
+                LoginErrorEnum.USERNAME_WRONG -> "Username wrong"
+                LoginErrorEnum.PASSWORD_WRONG -> "Password wrong"
+                LoginErrorEnum.ALREADY_LOGIN -> "Already login"
+                LoginErrorEnum.USERNAME_PWD_WRONG -> "Username and Password wrong"
+                LoginErrorEnum.USERNAME_PWD_ORERRUN -> "Password overrun"
+                LoginErrorEnum.USERNAME_PWD_MODIFY -> "Password modify"
+                else -> "Unknown"
+            }
+
+            when(LoginErrorEnum.fromInt(e.code)) {
+                LoginErrorEnum.USERNAME_WRONG -> throw LoginErrorUsernameWrongException(errorCodeMessage, e.code)
+                LoginErrorEnum.PASSWORD_WRONG -> throw LoginErrorPasswordWrongException(errorCodeMessage, e.code)
+                LoginErrorEnum.ALREADY_LOGIN -> throw LoginErrorAlreadyLoginException(errorCodeMessage, e.code)
+                LoginErrorEnum.USERNAME_PWD_WRONG -> throw LoginErrorUsernamePasswordWrongException(errorCodeMessage, e.code)
+                LoginErrorEnum.USERNAME_PWD_ORERRUN -> throw LoginErrorUsernamePasswordOverrunException(errorCodeMessage, e.code)
+                LoginErrorEnum.USERNAME_PWD_MODIFY -> throw LoginErrorUsernamePasswordModifyException(errorCodeMessage, e.code)
+                else -> throw ResponseErrorException(errorCodeMessage, e.code)
+            }
+        }
+    }
+
+    fun login() {
+        // Some models reportedly close the connection if we attempt to access login state too soon after
+        // setting up the session etc. In that case, retry a few times. The error is reported to be
+        // ConnectionError: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response')
+        val tries = 5
+        for (i in 0..tries) {
+            try {
+                val stateLogin = this.getStateLogin()
+                this.doLoginMagic(PasswordTypeEnum.fromInt(stateLogin.passwordType))
+                return
+            } catch (e: ConnectionErrorException) {
+                if (i == tries - 1) {
+                    throw e
+                }
+
+                val sleepTime = (i + 1)/ 10
+                Thread.sleep(sleepTime.toLong())
+            } catch (e: ResponseErrorNotSupportedException) {
+                // Prevent this exception from bubbling out from here...
+            }
+        }
+    }
+
+    private fun checkResponse(response: okhttp3.Response, mutator: Class<*>): Any? {
+        val responseString = response.body?.string()
+        println(responseString)
+        if (!response.isSuccessful) {
+            throw ConnectionErrorException("Connection error: ${response.code}")
+        }
+
+        try {
+            val errorResponse = xmlMapper.readValue(responseString, Error::class.java)
+
+            val errorCodeMessage = when (ResponseCodeEnum.fromInt(errorResponse.code)) {
+                ResponseCodeEnum.ERROR_SYSTEM_BUSY -> "System busy"
+                ResponseCodeEnum.ERROR_SYSTEM_NO_RIGHTS -> "No rights (needs login)"
+                ResponseCodeEnum.ERROR_SYSTEM_NO_SUPPORT -> "No support"
+                ResponseCodeEnum.ERROR_SYSTEM_UNKNOWN -> "Unknown"
+                ResponseCodeEnum.ERROR_SYSTEM_CSRF -> "Session error"
+                else -> "Unknown error"
+            }
+
+            when(ResponseCodeEnum.fromInt(errorResponse.code)) {
+                ResponseCodeEnum.ERROR_SYSTEM_BUSY -> throw ResponseErrorSystemBusyException(errorCodeMessage, errorResponse.code)
+                ResponseCodeEnum.ERROR_SYSTEM_NO_RIGHTS -> throw ResponseErrorLoginRequiredException(errorCodeMessage, errorResponse.code)
+                ResponseCodeEnum.ERROR_SYSTEM_NO_SUPPORT -> throw ResponseErrorNotSupportedException(errorCodeMessage, errorResponse.code)
+                ResponseCodeEnum.ERROR_SYSTEM_UNKNOWN ->  throw ResponseErrorException(errorCodeMessage, errorResponse.code)
+                ResponseCodeEnum.ERROR_SYSTEM_CSRF -> throw ResponseErrorLoginCsrfException(errorCodeMessage, errorResponse.code)
+                else -> throw ResponseErrorException(errorCodeMessage, errorResponse.code)
+            }
+        } catch (ex: ValueInstantiationException) {
+            return xmlMapper.readValue(responseString, mutator)
+        }
+    }
+
+    fun doGetRequest(endpoint: String, mutator: Class<*>): Any? {
+        val url = this._url + "api/" + endpoint
+        val request = Request.Builder().url(url).get().build()
+
+        val response = this.client.newCall(request).execute()
+        return this.checkResponse(response, mutator)
+    }
+
+    fun doPostRequest(endpoint: String, data: Login, mutator: Class<*>): Any? {
+        val url = this._url + "api/" + endpoint
+
+        // !FIXME !!!!!!!!!!!!!!!!!
+        // !FIXME Jackson XML is somehow broken, it ignores localName when using writeValueAsString....
+        // !FIXME !!!!!!!!!!!!!!!!!
+
+        val loginRequestBody = xmlMapper.writeValueAsString(data)
+
+        println(loginRequestBody)
+        val requestBody = RequestBody.create("application/xml".toMediaTypeOrNull(), loginRequestBody)
+        val request = Request.Builder().url(url).post(
+            requestBody
+        ).build()
+
+        val response = this.client.newCall(request).execute()
+        return this.checkResponse(response, mutator)
+    }
+
+    fun getStateLogin(): StateLogin {
+        return this.doGetRequest("user/state-login", StateLogin::class.java) as StateLogin
+    }
+
+    fun getToken(): Token {
+        return this.doGetRequest("webserver/token", Token::class.java) as Token
+    }
+
+    fun getSessionToken(): SessionToken {
+        return this.doGetRequest("webserver/SesTokInfo", SessionToken::class.java) as SessionToken
+    }
+
+    fun getNetNetMode(): NetModeResponse {
+        return this.doGetRequest("net/net-mode", NetModeResponse::class.java) as NetModeResponse
+    }
 }
 
-fun getSessionToken(): SessionToken {
-    val url = "http://192.168.8.1/api/webserver/SesTokInfo"
-    val request = Request.Builder().url(url).get().build()
+// ==============================================================================
+// MAIN
+// ==============================================================================
 
-    val response = client.newCall(request).execute()
-    val xmlMapper = XmlMapper()
-    val responseString = response.body?.string()
-    return xmlMapper.readValue(responseString, SessionToken::class.java)
+fun main(args: Array<String>) {
+    val huawei = Huawei("http://192.168.8.1/", "admin", "YOURPASSWORD")
+    huawei.login()
+    println(huawei.getNetNetMode())
 }
