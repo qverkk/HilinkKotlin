@@ -100,7 +100,31 @@ data class StateLogin(
     @JacksonXmlProperty(localName = "username")
     val username: String,
     @JacksonXmlProperty(localName = "password_type")
-    val passwordType: Int = 4
+    val passwordType: Int = 4,
+    @JacksonXmlProperty(localName = "extern_password_type")
+    val externPasswordType: Int,
+    @JacksonXmlProperty(localName = "history_login_flag")
+    val historyLoginFlag: Int,
+    @JacksonXmlProperty(localName = "guidemodifypwdpageflag")
+    val guidemodifypwdpageflag: Int,
+    @JacksonXmlProperty(localName = "password_rule")
+    val password_rule: Int,
+    @JacksonXmlProperty(localName = "rsapadingtype")
+    val rsapadingtype: Int,
+    @JacksonXmlProperty(localName = "accounts_number")
+    val accounts_number: Int,
+    @JacksonXmlProperty(localName = "wifipwdsamewithwebpwd")
+    val wifipwdsamewithwebpwd: Int,
+    @JacksonXmlProperty(localName = "remainwaittime")
+    val remainwaittime: Int,
+    @JacksonXmlProperty(localName = "lockstatus")
+    val lockstatus: Int,
+    @JacksonXmlProperty(localName = "forceskipguide")
+    val forceskipguide: Int,
+    @JacksonXmlProperty(localName = "firstlogin")
+    val firstlogin: Int,
+    @JacksonXmlProperty(localName = "userlevel")
+    val userlevel: Int
 )
 
 @JsonRootName("request")
@@ -381,5 +405,6 @@ class Huawei(url: String, username: String = "admin", password: String?) {
 fun main(args: Array<String>) {
     val huawei = Huawei("http://192.168.8.1/", "admin", "YOURPASSWORD")
     huawei.login()
-    println(huawei.getNetNetMode())
+    val message = huawei.getNetNetMode()
+    println(message)
 }
