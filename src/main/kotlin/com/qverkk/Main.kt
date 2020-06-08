@@ -1,5 +1,7 @@
 package com.qverkk
 
+import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.annotation.JsonRootName
 import com.fasterxml.jackson.databind.exc.ValueInstantiationException
 import com.fasterxml.jackson.dataformat.xml.XmlMapper
 import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlProperty
@@ -83,6 +85,8 @@ enum class LoginErrorEnum(val value: Int) {
 // DATA MODELS
 // ==============================================================================
 
+val xmlMapper = XmlMapper()
+
 data class Response(
     @JacksonXmlText
     @JacksonXmlProperty(localName = "response")
@@ -93,20 +97,20 @@ data class Response(
 data class StateLogin(
     @JacksonXmlProperty(localName = "State")
     val state: String,
-    @JacksonXmlProperty(localName = "Username")
+    @JacksonXmlProperty(localName = "username")
     val username: String,
     @JacksonXmlProperty(localName = "password_type")
     val passwordType: Int = 4
 )
 
-@JacksonXmlRootElement(localName = "request")
+@JsonRootName("request")
 data class Login(
-    @JacksonXmlProperty(localName = "Username")
-    val username: String,
-    @JacksonXmlProperty(localName = "Password")
-    val password: String,
-    @JacksonXmlProperty(localName = "password_type")
-    val passwordType: Int = 4
+    @set:JsonProperty("Username")
+    var username: String,
+    @set:JsonProperty("Password")
+    var password: String,
+    @set:JsonProperty("password_type")
+    var passwordType: Int = 4
 )
 
 @JacksonXmlRootElement(localName = "error")
@@ -301,7 +305,6 @@ class Huawei(url: String, username: String = "admin", password: String?) {
             throw ConnectionErrorException("Connection error: ${response.code}")
         }
 
-        val xmlMapper = XmlMapper()
         try {
             val errorResponse = xmlMapper.readValue(responseString, Error::class.java)
 
@@ -335,16 +338,14 @@ class Huawei(url: String, username: String = "admin", password: String?) {
         return this.checkResponse(response, mutator)
     }
 
-    fun doPostRequest(endpoint: String, data: Any,  mutator: Class<*>): Any? {
+    fun doPostRequest(endpoint: String, data: Login, mutator: Class<*>): Any? {
         val url = this._url + "api/" + endpoint
-        val xmlMapper = XmlMapper()
 
         // !FIXME !!!!!!!!!!!!!!!!!
         // !FIXME Jackson XML is somehow broken, it ignores localName when using writeValueAsString....
         // !FIXME !!!!!!!!!!!!!!!!!
 
-        val loginRequestBody = xmlMapper.writeValueAsString(data).replace("passwordType", "password_type").replace("username", "Username")
-            .replace("password", "Password").replace("Password_type", "password_type")
+        val loginRequestBody = xmlMapper.writeValueAsString(data)
 
         println(loginRequestBody)
         val requestBody = RequestBody.create("application/xml".toMediaTypeOrNull(), loginRequestBody)
@@ -378,8 +379,7 @@ class Huawei(url: String, username: String = "admin", password: String?) {
 // ==============================================================================
 
 fun main(args: Array<String>) {
-
-    val huawei = Huawei("http://192.168.1.8/", "admin", "YOUR_PASSWORD")
+    val huawei = Huawei("http://192.168.8.1/", "admin", "YOURPASSWORD")
     huawei.login()
     println(huawei.getNetNetMode())
 }
