@@ -98,8 +98,6 @@ enum class LoginErrorEnum(val value: Int) {
 // DATA MODELS
 // ==============================================================================
 
-val xmlMapper = XmlMapper()
-
 data class Response(
     @JacksonXmlText
     @JacksonXmlProperty(localName = "response")
@@ -202,6 +200,7 @@ class Huawei(url: String, username: String = "admin", password: String?) {
     private var _username: String
     private var _password: String?
     private lateinit var client: OkHttpClient
+    private val xmlMapper = XmlMapper()
     private var requestVerificationTokens: ArrayList<String> = ArrayList<String>()
 
     init {
